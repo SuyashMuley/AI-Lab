@@ -26,6 +26,12 @@ def user_config_path() -> Path:
     return base / "config.toml"
 
 
+def data_path() -> Path:
+    """Directory for local data (conversation history)."""
+    home = os.environ.get("LLMCLI_DATA_HOME")
+    return Path(home) if home else Path.home() / ".local" / "share" / "llmcli"
+
+
 def project_config_path() -> Path:
     return Path.cwd() / ".llmcli.toml"
 
@@ -46,6 +52,7 @@ class Settings(BaseSettings):
     timeout: float = Field(default=60.0, gt=0, description="Seconds of provider silence.")
     max_retries: int = Field(default=2, ge=0, description="Retries on 429/5xx/connection.")
     schema_retries: int = Field(default=2, ge=0, description="Retries on schema mismatch.")
+    save_history: bool = Field(default=True, description="Save conversations (SQLite).")
     aliases: dict[str, str] = Field(default_factory=dict)
     api_key: SecretStr | None = None  # env only (LLMCLI_API_KEY); for remote providers
 

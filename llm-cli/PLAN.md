@@ -93,3 +93,9 @@ LLM CLI/
 - Which second provider: Anthropic (different shape, better abstraction test) or Ollama (local, free)?
 - Type checker: mypy or Pyright?
 - Is session persistence (M9) wanted in this project?
+
+## Status
+
+M1, M2, M4-M10 are implemented. **M3 (second provider) is intentionally deferred**: Ollama is the only provider, so the abstraction has not yet been exercised against a differently shaped API, and the prompt-only structured-output path is covered by tests with a fake provider only.
+
+Decisions made along the way: first provider Ollama, type checker mypy (strict), M9 included. History is saved by default (`--no-save` or `save_history=false` to opt out).

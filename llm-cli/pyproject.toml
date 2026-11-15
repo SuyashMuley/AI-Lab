@@ -37,6 +37,7 @@ packages = ["src/llmcli"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = ["integration: hits a real provider; auto-skipped when it is unavailable"]
 
 [tool.ruff]
 line-length = 100

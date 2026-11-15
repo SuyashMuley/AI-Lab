@@ -39,3 +39,9 @@ class SchemaValidationError(LLMError):
     def __init__(self, message: str, last_output: str = "") -> None:
         super().__init__(message)
         self.last_output = last_output
+
+
+class StorageError(LLMError):
+    """Local session database could not be read or written."""
+
+    exit_code = 9

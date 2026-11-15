@@ -13,6 +13,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         if key.startswith("LLMCLI_"):
             monkeypatch.delenv(key)
     monkeypatch.setenv("LLMCLI_CONFIG_HOME", str(tmp_path / "userconf"))
+    monkeypatch.setenv("LLMCLI_DATA_HOME", str(tmp_path / "userdata"))  # never touch real history
     work = tmp_path / "work"
     work.mkdir()
     monkeypatch.chdir(work)
