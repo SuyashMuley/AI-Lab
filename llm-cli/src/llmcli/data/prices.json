@@ -1,0 +1,6 @@
+{
+  "_comment": "USD per 1M tokens. Keys are 'provider/model' (fnmatch wildcards allowed). Estimates only; verify against your provider's pricing page.",
+  "prices": {
+    "ollama/*": { "input": 0, "output": 0 }
+  }
+}
