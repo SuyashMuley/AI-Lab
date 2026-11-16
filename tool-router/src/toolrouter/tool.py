@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 import math
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from toolrouter.docstring import parse_docstring
 from toolrouter.errors import ToolDefinitionError
@@ -41,6 +42,10 @@ class Tool:
     max_output_chars: int = 20_000
     coerce: bool | None = None  # None = inherit the router default
     takes_model: bool = False  # True: handler(args_model_instance); False: handler(**fields)
+    # Validates + serializes return values; None when the result is unannotated or `Any`.
+    result_adapter: TypeAdapter[Any] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if not NAME_RE.match(self.name):
@@ -67,6 +72,9 @@ class Tool:
             raise ToolDefinitionError(
                 f"Tool {self.name!r}: max_output_chars must be a positive int"
             )
+        object.__setattr__(
+            self, "result_adapter", _build_result_adapter(self.name, self.result_type)
+        )
 
     @property
     def is_async(self) -> bool:
@@ -76,23 +84,35 @@ class Tool:
         """Call the original function directly (no validation); handy in tests."""
         return self.handler(*args, **kwargs)
 
-    async def invoke(self, args: BaseModel) -> Any:
-        """Run the handler with already-validated arguments.
-
-        Low level: no timeout or thread offload yet (the router adds those). Sync handlers
-        run inline here.
-        """
+    def bind(self, args: BaseModel) -> Callable[[], Any]:
+        """A zero-argument callable that runs the handler with already-validated arguments."""
         if not isinstance(args, self.args_model):
             raise TypeError(
                 f"{self.name}: expected {self.args_model.__name__}, got {type(args).__name__}"
             )
         if self.takes_model:
-            result = self.handler(args)
-        else:
-            result = self.handler(**{n: getattr(args, n) for n in self.args_model.model_fields})
+            return functools.partial(self.handler, args)
+        kwargs = {n: getattr(args, n) for n in self.args_model.model_fields}
+        return functools.partial(self.handler, **kwargs)
+
+    async def invoke(self, args: BaseModel) -> Any:
+        """Run the handler inline, no timeout or thread offload (the ToolExecutor adds those)."""
+        result = self.bind(args)()
         if inspect.isawaitable(result):
             result = await result
         return result
+
+
+def _build_result_adapter(name: str, result_type: Any | None) -> TypeAdapter[Any] | None:
+    if result_type is None or result_type is Any:
+        return None
+    try:
+        return TypeAdapter(result_type)
+    except Exception as exc:
+        raise ToolDefinitionError(
+            f"Tool {name!r}: return type {result_type!r} cannot be validated by Pydantic. "
+            "Annotate with a Pydantic-compatible type, or leave the return unannotated."
+        ) from exc
 
 
 def _explicit_model_param(fn: Callable[..., Any], model: type[BaseModel], name: str) -> None:

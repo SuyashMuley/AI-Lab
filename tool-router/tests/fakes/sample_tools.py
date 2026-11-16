@@ -1,7 +1,7 @@
 """Module-level sample tools (type hints must be resolvable, so not defined inside tests)."""
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -61,3 +61,9 @@ def title_tool(title: str, properties: int = 0) -> str:
 
 
 ALL = [get_weather, search, ship, now, title_tool]
+
+
+@tool
+def blob(meta: dict[str, Any]) -> str:
+    """Takes free-form metadata."""
+    return ""

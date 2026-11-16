@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Literal
 
+from toolrouter.calls import ToolCall
+from toolrouter.formats._util import call_id, get, raw_arguments, tool_name
 from toolrouter.schema import tool_schema
 from toolrouter.tool import Tool
 
@@ -28,3 +30,37 @@ def tools(
 ) -> list[dict[str, Any]]:
     """`tools=` payload. `api="chat"` for Chat Completions, `"responses"` for Responses."""
     return [tool(t, api) for t in source]
+
+
+def parse_calls(source: Any, api: Literal["chat", "responses"] = "chat") -> list[ToolCall]:
+    """Tool calls from a response.
+
+    chat: a message (with `tool_calls`) or the list of tool calls itself.
+    responses: a response (with `output`) or the list of output items; only `function_call`
+    items are used. Arguments stay as the JSON text the API returned.
+    """
+    calls: list[ToolCall] = []
+    if api == "chat":
+        items = source if isinstance(source, list | tuple) else get(source, "tool_calls")
+        for item in items or []:
+            fn = get(item, "function")
+            calls.append(
+                ToolCall(
+                    id=call_id(get(item, "id"), len(calls)),
+                    name=tool_name(get(fn, "name")),
+                    arguments=raw_arguments(get(fn, "arguments")),
+                )
+            )
+        return calls
+    items = source if isinstance(source, list | tuple) else get(source, "output")
+    for item in items or []:
+        if get(item, "type") != "function_call":
+            continue
+        calls.append(
+            ToolCall(
+                id=call_id(get(item, "call_id"), len(calls)),
+                name=tool_name(get(item, "name")),
+                arguments=raw_arguments(get(item, "arguments")),
+            )
+        )
+    return calls
