@@ -13,8 +13,8 @@ Twenty projects focused on building **AI agents, developer tools, and production
 
 | Project | Folder | Status |
 |---|---|---|
-| LLM CLI | [`llm-cli/`](llm-cli/) | ✅ Done (second provider deferred) |
-| Strict Pydantic Tool Router | `tool-router/` | ⬜ Not started |
+| LLM CLI | [`llm-cli/`](llm-cli/) | ✅ Done |
+| Strict Pydantic Tool Router | [`tool-router/`](tool-router/) | 📝 Planning |
 | Local Agent Runtime + Self-Healing ReAct | `local-agent-runtime/` | ⬜ Not started |
 | Dynamic Context Budget Assembler | `context-budget-assembler/` | ⬜ Not started |
 | Memory & Context Engine | `memory-context-engine/` | ⬜ Not started |
@@ -91,4 +91,4 @@ Build production-oriented infrastructure for running, routing, monitoring, and m
 |---|---|
 | **Folder** | [`llm-cli/`](llm-cli/) |
 | **Language** | Python 3.12+ |
-| **Status** | ✅ Complete except M3 (second provider, deferred); see [`PLAN.md`](llm-cli/PLAN.md) |
+| **Status** | ✅ Done (Ollama provider); see [`PLAN.md`](llm-cli/PLAN.md) |
