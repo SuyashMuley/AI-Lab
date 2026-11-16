@@ -193,10 +193,27 @@ def test_missing_field_issue() -> None:
     assert info.retryable
 
 
-def test_extra_field_issue_shows_value() -> None:
-    info = fail(get_weather, '{"city": "Oslo", "bogus": 1}')
+def test_extra_field_issue_names_the_field_but_never_echoes_its_value() -> None:
+    info = fail(get_weather, '{"city": "Oslo", "bogus": "hunter2-maybe-a-secret"}')
     (issue,) = info.issues
-    assert (issue.loc, issue.type, issue.got) == (["bogus"], "extra_forbidden", "1")
+    assert (issue.loc, issue.type, issue.got) == (["bogus"], "extra_forbidden", None)
+    assert "bogus: Extra inputs are not permitted" in info.message
+    assert "hunter2" not in info.message  # an undeclared field may be anything, even a secret
+
+
+def test_container_values_are_described_not_echoed() -> None:
+    info = fail(get_weather, {"city": {"password": "hunter2", "n": 1}})
+    assert info.issues[0].got == "<object, 2 keys>"
+    assert "hunter2" not in info.message
+    info = fail(get_weather, {"city": ["a", "b", "c"]})
+    assert info.issues[0].got == "<array, 3 items>"
+
+
+def test_hostile_field_names_are_clipped() -> None:
+    long_key = "k" * 50_000
+    info = fail(get_weather, {"city": "Oslo", long_key: 1})
+    assert len(info.message) < 600
+    assert len(info.issues[0].loc[0]) <= 60
 
 
 def test_wrong_type_issue_shows_got() -> None:

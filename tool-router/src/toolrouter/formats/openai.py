@@ -9,7 +9,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Literal
 
-from toolrouter.calls import ToolCall
+from toolrouter.calls import ToolCall, ToolResult
+from toolrouter.feedback import model_text
 from toolrouter.formats._util import call_id, get, raw_arguments, tool_name
 from toolrouter.schema import tool_schema
 from toolrouter.tool import Tool
@@ -64,3 +65,22 @@ def parse_calls(source: Any, api: Literal["chat", "responses"] = "chat") -> list
             )
         )
     return calls
+
+
+def result_messages(
+    results: Iterable[ToolResult], api: Literal["chat", "responses"] = "chat"
+) -> list[dict[str, Any]]:
+    """Items to append after the assistant turn, one per result, in order.
+
+    chat: `{"role": "tool", "tool_call_id", "content"}` messages.
+    responses: `{"type": "function_call_output", "call_id", "output"}` input items.
+    Failures are prefixed `Error (<code>): ` because these APIs have no error flag.
+    """
+    if api == "chat":
+        return [
+            {"role": "tool", "tool_call_id": r.call_id, "content": model_text(r)} for r in results
+        ]
+    return [
+        {"type": "function_call_output", "call_id": r.call_id, "output": model_text(r)}
+        for r in results
+    ]

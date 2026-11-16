@@ -78,9 +78,10 @@ tool-router/
 │   ├── executor.py      # run handler: timeout, daemon-thread offload for sync code, abandonment
 │   ├── results.py       # validate + serialize handler return values (exact str raw, else JSON)
 │   ├── router.py        # ToolRouter.dispatch / dispatch_many
-│   ├── policy.py        # Policy protocol, SideEffect levels, built-in policies
-│   ├── hooks.py         # RouterHook protocol (before/after), logging hook with redaction
+│   ├── policy.py        # Policy protocol, PolicyDecision, AllowAll/MaxSideEffect/ReadOnly/AllowList/DenyList/AllOf
+│   ├── hooks.py         # RouterHook base, CallEvent/ResultEvent, RecordingHook, LoggingHook
 │   ├── feedback.py      # error -> model-readable text, did-you-mean
+│   ├── redact.py        # schema-driven secret redaction + bounding of logged arguments
 │   ├── formats/         # anthropic.py, openai.py, ollama.py (tools out, calls in, results out)
 │   └── cli.py           # demo: list, schema, call, chat
 ├── examples/tools.py    # calculator, read_file (confined path), get_time
@@ -157,13 +158,14 @@ messages = anthropic.result_messages(results)  # back into the conversation
 6. **One normalized schema pipeline.** Pydantic's JSON schema is post-processed once (inline `$ref`/`$defs`, drop `title` noise, force `additionalProperties: false`, normalize optionals). Provider adapters then apply their quirks (OpenAI Chat vs Responses envelopes, Anthropic `input_schema`, Ollama). Recursive models are rejected at registration because they can't be inlined. **OpenAI `strict` mode is deferred:** it needs every property required and optionals nullable, so it can't ship until validation (T3) has a story for the nulls models then send for omitted optionals. Schemas are snapshot-tested (`UPDATE_SNAPSHOTS=1` to regenerate; a missing snapshot fails).
 7. **Execution is bounded.** Per-tool timeout (covering the whole call, and never confused with a handler's own `TimeoutError`), output cap with a visible truncation marker (the marker counts inside the cap). Sync handlers run in **per-call daemon threads with the caller's contextvars**, not a pool: a stuck handler can't wedge a shared pool, can't block interpreter exit, and a call that already timed out can never start later. Concurrency is bounded by `max_threads` (default 32); when saturated, new sync calls **fail fast** (retryable `TOOL_FAILED`) instead of queueing silently. A thread cannot be killed: on timeout or cancellation the caller stops waiting, the thread is tracked as *abandoned* until it ends, and its late result is discarded (real isolation arrives in the Sandboxed Execution project).
 8. **Parallel calls are independent, except that writes are ordered.** `dispatch_many` uses `max_concurrency` worker tasks pulling from the batch (a 10,000-call batch costs a handful of tasks, not 10,000), preserves call order in the results, and one failure never affects siblings. Calls to WRITE tools in the same batch run one at a time in the order the model listed them (`serialize_writes`, on by default, switchable per router or per batch), while READ/NONE calls stay fully parallel; a waiting write holds its concurrency slot. Cancelling the caller cancels every running handler and starts nothing new (a `TaskGroup` guarantees no orphan tasks).
-9. **Policy is a seam, not a product.** A `Policy` can allow/deny a call based on tool, side effect, and validated args. Built-ins: `AllowAll`, `ReadOnlyPolicy`, `AllowList`. Real policy enforcement is the later Security Gateway project.
-10. **Hooks for observability.** `before`/`after` hooks receive the call and result. The built-in logging hook redacts values of fields marked secret and truncates large payloads. The later Observability project builds on this.
+9. **Policy is a seam, not a product, and it fails closed.** A `Policy` (sync or async) sees the tool, the raw call and the *validated* arguments, after validation and before the handler, and returns a `PolicyDecision`. Built-ins: `AllowAll` (default), `MaxSideEffect(level)` / `ReadOnlyPolicy`, `AllowList`, `DenyList`, and `AllOf` (first denial wins). A policy that raises, or returns anything but a `PolicyDecision`, blocks the call (`INTERNAL_ERROR`, generic message). Denials are `POLICY_DENIED` with the policy's reason, never echoing arguments. Known limitation: policies run after validation, so a denied tool's signature can still leak through validation errors, and unknown-tool messages list every registered tool; hide tools from a model by registering only what it may use.
+10. **Hooks for observability, and secrets stay out.** Every dispatch fires exactly one `before` and one `after` on each hook, for every outcome (unknown tool, invalid arguments, denial, timeout, failure, caller cancellation). Hooks run in order, may be sync or async, and are contained: a hook that raises or exceeds `hook_timeout_s` is logged (type name only) and skipped, never changing the result. Events carry *redacted, bounded* arguments (`raw_call` is the unredacted escape hatch). A field is secret if it is a `SecretStr`/`SecretBytes` or `Annotated[..., Secret()]`; redaction is schema-driven (nested models, lists, maps, unions) and fails closed: undeclared fields on closed objects are redacted, unparseable or unattributable arguments are omitted entirely, and unresolvable locations are treated as secret if anything beneath them could be. Secret defaults are never sent to a provider, and validation errors never echo a secret, an undeclared field's value, or a container's contents (containers are described by size; field names are clipped). `LoggingHook` logs one line per call and keeps exception text out unless `include_tracebacks=True`.
 11. **Untrusted input limits.** Max argument payload size (default 64 KB) and max JSON nesting depth are checked before validation, so a hostile or runaway model cannot cost unbounded CPU or memory. Non-standard input is rejected outright: duplicate keys, `NaN`/`Infinity`, non-object top levels, lone surrogates. An empty argument string means "no arguments" (models often send `""` for zero-arg tools); required fields are still required. Validation always runs in Pydantic's **JSON mode** (dict input is serialized first, so both input forms get identical checks): strict JSON mode accepts strings for enums, datetimes, UUIDs and paths but rejects `"42"` for an int and `1` for a bool, whereas Python-mode strict would wrongly reject enums.
 12. **Deterministic IDs and ordering.** Missing call IDs are generated (`call_<n>`); results always reference the originating `call_id`.
 13. **Tools may return Pydantic models.** The return annotation becomes the result type: models are serialized with `model_dump_json`, `str` passes through, other JSON-able types go through a `TypeAdapter`. The returned value is validated against the annotation, so a handler bug surfaces as `RESULT_INVALID` instead of garbage reaching the model. Results are output-only and never coerced. An exact `str` is returned raw, everything else as JSON (`None` becomes `null`); a dict that strictly satisfies a declared model is accepted. Unannotated or `Any` returns are serialized, not validated.
 14. **`ConfinedPath` ships in the library** (`toolrouter.argtypes`, as the `Confined` annotation marker). A path type that resolves symlinks and `..` and rejects anything outside a configured root, so file tools get safe paths from validation rather than ad-hoc checks. It is a validation-time guard, not a sandbox (that is Phase 3).
 15. **Plain asyncio, no anyio.** Python 3.12 has `asyncio.TaskGroup`, `asyncio.timeout`, and `asyncio.to_thread`, which cover structured concurrency, timeouts, and thread offload. It avoids a dependency and matches llm-cli.
+16. **Error messages are repair prompts.** Messages say what was wrong *and* what a valid call looks like: invalid-argument and invalid-JSON errors end with `Expected: get_weather(city: string, units?: "c" | "f" = "c")` (optional params marked `?`, defaults and numeric/length limits shown, nesting capped, always bounded), and unknown tools get a deterministic did-you-mean (an exact match modulo case and `-`/`_` is the only suggestion). What a model finally receives comes from `feedback.model_text`: content on success (`(no output)` if empty, since providers mishandle empty results), `Error (<code>): <message>` on failure, because OpenAI and Ollama have no error flag (Anthropic additionally gets `is_error`). `ToolResult.text` stays the raw content-or-message for logs and demos. Feedback helpers never raise, since they run while reporting errors.
 
 ## Error taxonomy
 | Code | When | Retryable by model | Notes |
@@ -190,10 +192,10 @@ Output truncation is not an error: `ok=True`, `truncated=True`, with a marker li
 | T4 | Router dispatch + result envelope | **Done.** `dispatch()` returns a `ToolResult` for every model-caused failure except timeout/cancellation (T5) and policy denial (T8): unknown tool, invalid JSON, oversized, invalid arguments, tool failure, invalid result, internal error. It never raises for them (only `Exception` is caught; `CancelledError`/`KeyboardInterrupt`/`SystemExit` propagate); handler only runs after validation; Pydantic/str/JSON return values serialized and validated against the return annotation |
 | T5 | Execution safety | **Done.** Per-tool timeouts; sync handlers off the event loop; cancellation works; output truncation; handler exceptions sanitized (no traceback/paths to the model) |
 | T6 | Parallel dispatch | **Done.** `dispatch_many` honors `max_concurrency`, preserves order, isolates failures, cancels cleanly |
-| T7 | Model-facing feedback | Errors render as concise repair prompts; did-you-mean for tool names; provider-specific result messages (Anthropic `tool_result`, OpenAI `tool` role, Ollama `tool`) |
-| T8 | Policy + hooks | Side-effect levels enforced by built-in policies; `before`/`after` hooks fire for every outcome incl. failures; log redaction of secret fields |
-| T9 | Demo CLI + real model | `toolrouter chat` runs a real Ollama tool-calling model through the router with a small repair loop (max N attempts); `list`, `schema`, `call` subcommands; smoke tests skip without Ollama |
-| T10 | Polish | README, property/fuzz test suite green, examples, installable with `uv tool install`, mypy strict clean |
+| T7 | Model-facing feedback | **Done.**  Errors render as concise repair prompts; did-you-mean for tool names; provider-specific result messages (Anthropic `tool_result`, OpenAI `tool` role, Ollama `tool`) |
+| T8 | Policy + hooks | **Done.** Side-effect levels enforced by built-in policies; `before`/`after` hooks fire for every outcome incl. failures; log redaction of secret fields |
+| T9 | Demo CLI + real model | **Done.**  `toolrouter chat` runs a real Ollama tool-calling model through the router with a small repair loop (max N attempts); `list`, `schema`, `call` subcommands; smoke tests skip without Ollama |
+| T10 | Polish | **Done.**  README, property/fuzz test suite green, examples, installable with `uv tool install`, mypy strict clean |
 
 **Usable library: T4. Production-grade core: T8. Proven against a real model: T9.**
 
@@ -211,9 +213,24 @@ Output truncation is not an error: `ok=True`, `truncated=True`, with a marker li
 - Did-you-mean suggestions are deterministic.
 - Optional smoke test with real Ollama tool calling (skipped when unavailable).
 
+## Demo CLI (T9)
+
+`toolrouter` (needs the `cli` extra: typer, rich, ollama) is a thin shell over the library; the core stays pydantic-only and `toolrouter.demo.*` imports no SDK.
+
+| Command | What it does |
+|---|---|
+| `list` | tools with side effect, signature and description |
+| `schema [TOOL] --format ollama\|anthropic\|openai\|openai-responses\|json` | provider-ready tool payloads |
+| `call TOOL --args JSON [--json] [--coerce] [--read-only]` | one call through the router, exactly as a model's call is handled |
+| `chat PROMPT [--model] [--max-turns] [--max-repairs] [--allow-writes] [--coerce] [--model-timeout] [--max-tokens]` | a local model uses the tools; answer on stdout, redacted trace and summary on stderr |
+
+Safe by default: `chat` is read-only unless `--allow-writes`, the demo file tools are confined to `--files-dir`, every model reply is bounded by `--model-timeout` (default 120s) and `--max-tokens` (default 1024), and the repair budget (`--max-repairs`, default 2) counts only failures the model can fix by changing its call (unknown tool, bad JSON, invalid or oversized arguments). `--tools MODULE|file.py` replaces the demo tools with your own (it executes that code). Exit codes: 0 ok, 1 call failed (`call`), 2 usage error, 3 model unreachable/missing/cannot use tools/timed out, 4 model gave up, 130 interrupted.
+
+Demo tools: `calculator` (AST-based, no `eval`; refuses huge powers, non-finite results and over-long or over-complex input), `get_time`, and `read_file`/`list_dir`/`write_file` confined to a directory (writes refuse to overwrite unless asked).
+
 ## Risks
 - **Provider schema quirks drift.** Isolated in `formats/` with snapshot tests so a provider change is a one-file fix.
-- **Strict mode frustrates weaker models** (e.g. numbers as strings). That is what the feedback format and the per-tool `coerce` opt-in are for; T9 measures how often repair is needed on a small local model.
+- **Strict mode frustrates weaker models** (e.g. numbers as strings). *Measured in T9* on `llama3.2` (3B), 10 tasks x 3 runs per mode against the demo tools: 36 tool calls per mode, strict mode saw **1 malformed call (2.8%)** in 1 of 30 runs, repaired it, and all 30 runs finished; `--coerce` saw none. So at this task level strict-by-default costs almost nothing and `coerce` is not needed; the numbers are from a small sample, my own prompts and one model, so re-measure for harder tools or weaker models.
 - **Can't kill a stuck sync thread.** Mitigated, not solved: results return on time, stuck threads are counted (`router.executor.abandoned_threads`), daemon threads never block exit, and a saturated executor fails fast. A handler that swallows `CancelledError` can also outlive its async timeout. Real isolation needs the sandboxed-execution project.
 - **Scope creep into the agent loop.** The only loop in this project is the minimal repair loop in the demo CLI; the real one is project 3.
 
@@ -225,3 +242,20 @@ Output truncation is not an error: `ok=True`, `truncated=True`, with a marker li
 | Result models | Pydantic models allowed (and `str` / JSON-able values) |
 | anyio vs asyncio | Plain asyncio |
 | Ollama model for T9 | `llama3.2` (3B); pull it before T9. Fallback to a larger tool-capable model (e.g. a Qwen 2.5/3 7B-class) if the repair rate is too high |
+
+## Status
+
+**Done: T1-T10.** The library, its tests and the demo CLI are complete.
+
+- 763 tests (758 offline + 5 against a real `llama3.2`), ruff clean, mypy `--strict` clean over `src`, `tests` and `examples`; property tests scale with `FUZZ_SCALE`.
+- The README is executable documentation: its runnable blocks, the CLI flags and error codes it mentions, and the defaults it states are all checked by tests. `examples/` is type-checked and tested too.
+- Packaging is verified by building the wheel and installing it with `uv tool install`, with the `cli` extra (full CLI) and without it (friendly message; the library still works with no CLI dependencies imported).
+
+Deviations from the original plan, all deliberate: `Tool` is a frozen dataclass (not a `ToolSpec` model); `ConfinedPath` ships as the `Confined` annotation marker; OpenAI `strict` mode is not emitted (it needs a null-handling story in validation); `dispatch_many` serializes WRITE calls within a batch; demo code lives in `toolrouter.demo` and the CLI needs the optional `cli` extra.
+
+Verified live only against Ollama + `llama3.2`. Anthropic and OpenAI shapes are covered by unit and snapshot tests, not run against the live APIs.
+
+Known limits (also in the README): no sandbox (a stuck sync thread is abandoned, not killed; `Confined` is checked at validation time); secret redaction is schema-driven, so a secret in a declared non-secret field cannot be recognised; policies run after validation; hooks that block the loop can't be timed out.
+
+Natural next steps live in later projects: the real agent loop (Local Agent Runtime), sandboxed execution, and the security gateway.
+

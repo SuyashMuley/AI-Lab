@@ -17,6 +17,9 @@ from pydantic import BaseModel, ValidationError
 
 from toolrouter.calls import ToolCallError, ValidationIssue, make_error
 from toolrouter.errors import ErrorCode
+from toolrouter.feedback import signature
+from toolrouter.redact import REDACTED, secret_at
+from toolrouter.schema import redaction_schema
 from toolrouter.tool import SideEffect, Tool
 
 
@@ -156,10 +159,13 @@ def arguments_text(raw: object, limits: Limits = DEFAULT_LIMITS) -> str:
         )
     except json.JSONDecodeError as exc:
         raise _invalid_json(
-            f"Arguments are not valid JSON: {exc.msg} at line {exc.lineno} column {exc.colno}"
+            f"Arguments are not valid JSON: {exc.msg} at line {exc.lineno} column {exc.colno}. "
+            "Send a single valid JSON object."
         ) from None
     except _Rejected as exc:
-        raise _invalid_json(f"Arguments are not valid JSON: {exc}") from None
+        raise _invalid_json(
+            f"Arguments are not valid JSON: {exc}. Send a single valid JSON object."
+        ) from None
     except RecursionError:
         raise _too_large("arguments are nested too deeply", limits) from None
     if not isinstance(parsed, dict):
@@ -169,6 +175,15 @@ def arguments_text(raw: object, limits: Limits = DEFAULT_LIMITS) -> str:
 
 
 # ---- validation ------------------------------------------------------------------------------
+
+
+_MAX_LOC_PART = 60  # field names come from the model too: never echo them unbounded
+
+
+def _clip(part: str | int) -> str | int:
+    if isinstance(part, str) and len(part) > _MAX_LOC_PART:
+        return part[: _MAX_LOC_PART - 1] + "…"
+    return part
 
 
 def _format_loc(loc: tuple[str | int, ...]) -> str:
@@ -181,21 +196,30 @@ def _format_loc(loc: tuple[str | int, ...]) -> str:
 
 
 def _preview(value: Any, limit: int) -> str:
+    """A short description of a rejected value. Containers are described, never echoed: they may
+    hold secrets under keys we know nothing about."""
+    if isinstance(value, dict):
+        return f"<object, {len(value)} keys>"
+    if isinstance(value, list):
+        return f"<array, {len(value)} items>"
     text = repr(value)
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _issues(exc: ValidationError, limits: Limits) -> tuple[list[ValidationIssue], int]:
+def _issues(
+    exc: ValidationError, limits: Limits, schema: dict[str, Any]
+) -> tuple[list[ValidationIssue], int]:
     errors = exc.errors(include_url=False, include_context=False, include_input=True)
-    issues = [
-        ValidationIssue(
-            loc=list(e["loc"]),
-            msg=e["msg"],
-            type=e["type"],
-            got=None if e["type"] == "missing" else _preview(e.get("input"), limits.got_chars),
-        )
-        for e in errors[: limits.max_issues]
-    ]
+    issues = []
+    for e in errors[: limits.max_issues]:
+        if e["type"] in ("missing", "extra_forbidden"):
+            got = None  # nothing to show / an undeclared field's value (we cannot know it is safe)
+        elif secret_at(schema, e["loc"]):
+            got = REDACTED  # never echo a secret back, not even in an error
+        else:
+            got = _preview(e.get("input"), limits.got_chars)
+        loc = [_clip(part) for part in e["loc"]]
+        issues.append(ValidationIssue(loc=loc, msg=e["msg"], type=e["type"], got=got))
     return issues, max(0, len(errors) - len(issues))
 
 
@@ -207,12 +231,20 @@ def validate_call(
     limits: Limits = DEFAULT_LIMITS,
 ) -> BaseModel:
     """Validated arguments for `tool`, or ToolCallError. Never calls the handler."""
-    text = arguments_text(arguments, limits)
+    try:
+        text = arguments_text(arguments, limits)
+    except ToolCallError as exc:
+        if exc.info.code is ErrorCode.INVALID_JSON:  # show what a valid call looks like
+            base = exc.info.message
+            base += "" if base.endswith((".", "!", "?")) else "."
+            hint = f"{base} Expected: {signature(tool)}"
+            raise ToolCallError(make_error(ErrorCode.INVALID_JSON, hint)) from None
+        raise
     lenient = resolve_coerce(tool, router_coerce)
     try:
         return tool.args_model.model_validate_json(text, strict=not lenient)
     except ValidationError as exc:
-        issues, more = _issues(exc, limits)
+        issues, more = _issues(exc, limits, redaction_schema(tool))
         detail = "; ".join(
             f"{_format_loc(tuple(i.loc))}: {i.msg}" + (f" (got {i.got})" if i.got else "")
             for i in issues
@@ -221,7 +253,8 @@ def validate_call(
         raise ToolCallError(
             make_error(
                 ErrorCode.ARGUMENTS_INVALID,
-                f"Invalid arguments for {tool.name!r}: {detail}{extra}",
+                f"Invalid arguments for {tool.name!r}: {detail}{extra}. "
+                f"Expected: {signature(tool)}",
                 issues,
             )
         ) from None

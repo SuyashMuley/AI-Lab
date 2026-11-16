@@ -3,10 +3,11 @@
 import json
 from typing import Any
 
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from tests.fakes.sample_tools import ALL, blob
+from tests.fuzz import fuzz
 from toolrouter import ToolCallError, validate_call
 from toolrouter.errors import ErrorCode
 
@@ -42,7 +43,7 @@ def outcome(tool: Any, arguments: Any, **kw: Any) -> None:
         assert isinstance(result, tool.args_model)
 
 
-@settings(max_examples=400, deadline=None)
+@fuzz(400)
 @given(tools, json_values, st.booleans())
 def test_any_json_value_as_text(tool: Any, value: Any, coerce: bool) -> None:
     try:
@@ -52,33 +53,33 @@ def test_any_json_value_as_text(tool: Any, value: Any, coerce: bool) -> None:
     outcome(tool, text, router_coerce=coerce)
 
 
-@settings(max_examples=400, deadline=None)
+@fuzz(400)
 @given(tools, st.dictionaries(st.text(max_size=8), json_values, max_size=5), st.booleans())
 def test_any_dict(tool: Any, arguments: dict[str, Any], coerce: bool) -> None:
     outcome(tool, arguments, router_coerce=coerce)
 
 
-@settings(max_examples=400, deadline=None)
+@fuzz(400)
 @given(tools, st.text(alphabet=st.characters(codec="utf-8", exclude_categories=()), max_size=200))
 def test_arbitrary_text(tool: Any, text: str) -> None:
     outcome(tool, text)
 
 
-@settings(max_examples=300, deadline=None)
+@fuzz(300)
 @given(tools, st.binary(max_size=200))
 def test_arbitrary_bytes_as_lossy_text(tool: Any, data: bytes) -> None:
     outcome(tool, data.decode("utf-8", errors="surrogateescape"))
     outcome(tool, data)  # raw bytes are rejected, not crashed on
 
 
-@settings(max_examples=200, deadline=None)
+@fuzz(200)
 @given(tools, st.text(max_size=100), st.text(max_size=100))
 def test_json_text_with_mangled_tail(tool: Any, head: str, tail: str) -> None:
     outcome(tool, json.dumps({"city": head}) + tail)
     outcome(tool, tail + json.dumps({"city": head}))
 
 
-@settings(max_examples=200, deadline=None)
+@fuzz(200)
 @given(st.integers(min_value=1, max_value=400))
 def test_nesting_depth_is_always_bounded(depth: int) -> None:
     text = '{"meta": ' + "[" * depth + "]" * depth + "}"

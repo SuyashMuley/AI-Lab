@@ -4,10 +4,11 @@ import asyncio
 import json
 from typing import Any
 
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from tests.fakes import router_tools as rt
+from tests.fuzz import fuzz
 from toolrouter import ToolCall, ToolRegistry, ToolResult, ToolRouter
 
 REGISTRY = ToolRegistry([*rt.SAFE, rt.delete])  # includes one WRITE tool
@@ -33,7 +34,7 @@ def key(r: ToolResult) -> tuple[Any, ...]:
     return (r.call_id, r.name, r.ok, r.content, r.truncated, r.error)
 
 
-@settings(max_examples=200, deadline=None)
+@fuzz(200)
 @given(calls_strategy, st.integers(min_value=1, max_value=8), st.booleans())
 def test_batch_equals_sequential_dispatch(
     spec: list[tuple[str, Any]], concurrency: int, serialize: bool

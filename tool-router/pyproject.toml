@@ -4,9 +4,23 @@ version = "0.1.0"
 description = "Strict Pydantic tool router: define, validate, route, and safely execute LLM tool calls."
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["llm", "tool-calling", "function-calling", "pydantic", "agents"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+    "Intended Audience :: Developers",
+]
 dependencies = [
     "pydantic>=2.7",
 ]
+
+[project.optional-dependencies]
+# The core library needs only pydantic. The demo CLI (`toolrouter ...`) needs these.
+cli = ["typer>=0.12", "rich>=13", "ollama>=0.4"]
+
+[project.scripts]
+toolrouter = "toolrouter._entry:main"
 
 [dependency-groups]
 dev = [
@@ -17,6 +31,10 @@ dev = [
     "jsonschema>=4.26.0",
     "types-jsonschema>=4.26.0.20261006",
     "hypothesis>=6.170.15",
+    # for the demo CLI tests (the core library itself needs only pydantic)
+    "typer>=0.12",
+    "rich>=13",
+    "ollama>=0.4",
 ]
 
 [build-system]
@@ -30,6 +48,7 @@ packages = ["src/toolrouter"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = ["integration: hits a real model; auto-skipped when Ollama or the model is unavailable"]
 
 [tool.ruff]
 line-length = 100
@@ -40,4 +59,4 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "examples"]

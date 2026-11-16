@@ -4,10 +4,11 @@ import asyncio
 import json
 from typing import Any
 
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
 from tests.fakes import router_tools as rt
+from tests.fuzz import fuzz
 from toolrouter import ErrorCode, ToolCall, ToolCallError, ToolRegistry, ToolRouter, validate_call
 
 CLIENT_ERRORS = {
@@ -43,7 +44,7 @@ def _dumps(value: Any) -> str:
         return "{"
 
 
-@settings(max_examples=500, deadline=None)
+@fuzz(500)
 @given(names, arguments_strategy(), st.booleans())
 def test_dispatch_never_raises_and_handlers_only_run_after_validation(
     name: str, arguments: Any, coerce: bool

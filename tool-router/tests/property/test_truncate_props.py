@@ -1,10 +1,11 @@
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 
+from tests.fuzz import fuzz
 from toolrouter.results import truncate
 
 
-@settings(max_examples=500, deadline=None)
+@fuzz(500)
 @given(st.text(max_size=3000), st.integers(min_value=1, max_value=4000))
 def test_truncate_invariants(text: str, limit: int) -> None:
     out, was_truncated = truncate(text, limit)

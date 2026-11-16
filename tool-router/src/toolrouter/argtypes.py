@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import GetCoreSchemaHandler
+from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import PydanticCustomError, core_schema
 
 
@@ -54,3 +55,21 @@ class Confined:
         if self.must_exist and not real.exists():
             raise PydanticCustomError("path_not_found", "path does not exist")
         return real
+
+
+@dataclass(frozen=True)
+class Secret:
+    """Annotated metadata marking an argument as a secret:
+
+        api_key: Annotated[str, Secret()]
+
+    Secret values are redacted from hook events and logs and from the argument previews in
+    validation errors, and a secret's default is never sent to a model. The handler still
+    receives the plain value (use pydantic's `SecretStr` instead if you want it wrapped).
+    `SecretStr`/`SecretBytes` fields are recognised automatically.
+    """
+
+    def __get_pydantic_json_schema__(
+        self, schema: core_schema.CoreSchema, handler: Any
+    ) -> JsonSchemaValue:
+        return {**handler(schema), "writeOnly": True}

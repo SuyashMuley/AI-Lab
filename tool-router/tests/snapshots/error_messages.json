@@ -1,0 +1,13 @@
+{
+  "bad_enum": "Invalid arguments for 'get_weather': units: Input should be 'c' or 'f' (got 'kelvin'). Expected: get_weather(city: string, units?: \"c\" | \"f\" = \"c\")",
+  "duplicate_key": "Arguments are not valid JSON: duplicate key 'city'. Send a single valid JSON object. Expected: get_weather(city: string, units?: \"c\" | \"f\" = \"c\")",
+  "extra_field": "Invalid arguments for 'now': x: Extra inputs are not permitted. Expected: now()",
+  "invalid_json": "Arguments are not valid JSON: Expecting value at line 1 column 10. Send a single valid JSON object. Expected: get_weather(city: string, units?: \"c\" | \"f\" = \"c\")",
+  "missing_field": "Invalid arguments for 'get_weather': city: Field required. Expected: get_weather(city: string, units?: \"c\" | \"f\" = \"c\")",
+  "nested": "Invalid arguments for 'ship': address.street: Input should be a valid string (got 1); extras[0].city: Field required. Expected: ship(address: { street: string, city: string, zip?: string | null = null }, extras: ({ street: string, city: string, zip?: string | null = null })[], color?: \"red\" | \"blue\" = \"red\")",
+  "not_an_object": "Arguments must be a JSON object, got an array. Expected: search(query: string (1-200 chars), limit?: integer (1-50) = 10, tags?: string[] | null = null)",
+  "out_of_range": "Invalid arguments for 'search': limit: Input should be greater than or equal to 1 (got 0). Expected: search(query: string (1-200 chars), limit?: integer (1-50) = 10, tags?: string[] | null = null)",
+  "unknown_garbage": "Unknown tool 'zzz'. Available tools: get_weather, search, ship, now, title_tool.",
+  "unknown_typo": "Unknown tool 'get_wether'. Did you mean 'get_weather'? Available tools: get_weather, search, ship, now, title_tool.",
+  "wrong_type": "Invalid arguments for 'search': limit: Input should be a valid integer (got 'ten'). Expected: search(query: string (1-200 chars), limit?: integer (1-50) = 10, tags?: string[] | null = null)"
+}
