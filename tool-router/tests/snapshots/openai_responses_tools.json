@@ -1,0 +1,182 @@
+[
+  {
+    "description": "Current weather for a city.",
+    "name": "get_weather",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "city": {
+          "description": "Name of the city.",
+          "type": "string"
+        },
+        "units": {
+          "default": "c",
+          "description": "Temperature units.",
+          "enum": [
+            "c",
+            "f"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "city"
+      ],
+      "type": "object"
+    },
+    "type": "function"
+  },
+  {
+    "description": "Search documents.",
+    "name": "search",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "query": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "type": "function"
+  },
+  {
+    "description": "Ship a parcel.",
+    "name": "ship",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "additionalProperties": false,
+          "properties": {
+            "city": {
+              "description": "City name.",
+              "type": "string"
+            },
+            "street": {
+              "type": "string"
+            },
+            "zip": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "street",
+            "city"
+          ],
+          "type": "object"
+        },
+        "color": {
+          "default": "red",
+          "description": "A color.",
+          "enum": [
+            "red",
+            "blue"
+          ],
+          "type": "string"
+        },
+        "extras": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "city": {
+                "description": "City name.",
+                "type": "string"
+              },
+              "street": {
+                "type": "string"
+              },
+              "zip": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "street",
+              "city"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "address",
+        "extras"
+      ],
+      "type": "object"
+    },
+    "type": "function"
+  },
+  {
+    "description": "Current time.",
+    "name": "now",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "type": "function"
+  },
+  {
+    "description": "Has fields named like schema keywords.",
+    "name": "title_tool",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "properties": {
+          "default": 0,
+          "type": "integer"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "type": "function"
+  }
+]
