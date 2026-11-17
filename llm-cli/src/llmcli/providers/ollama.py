@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import ollama
@@ -18,8 +19,8 @@ from llmcli.core.errors import (
     ProviderUnavailableError,
     RateLimitError,
 )
-from llmcli.core.events import Done, Event, TextDelta, UsageEvent
-from llmcli.core.models import LLMRequest, Usage
+from llmcli.core.events import Done, Event, TextDelta, ToolCallEvent, UsageEvent
+from llmcli.core.models import LLMRequest, ToolCallPart, ToolSpec, Usage
 
 
 def _normalize(exc: Exception) -> LLMError:
@@ -45,6 +46,53 @@ def _normalize(exc: Exception) -> LLMError:
     return err
 
 
+def _arguments(call: ToolCallPart) -> dict[str, Any]:
+    """Ollama wants tool-call arguments as an object; accept JSON text from other sources."""
+    if isinstance(call.arguments, dict):
+        return call.arguments
+    if not call.arguments.strip():
+        return {}
+    try:
+        parsed = json.loads(call.arguments)
+    except json.JSONDecodeError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        raise InvalidRequestError(f"arguments of tool call {call.name!r} are not a JSON object")
+    return parsed
+
+
+def to_ollama_messages(request: LLMRequest) -> list[dict[str, Any]]:
+    """Internal messages -> Ollama chat messages (a tool message becomes one per result)."""
+    out: list[dict[str, Any]] = []
+    if request.system:
+        out.append({"role": "system", "content": request.system})
+    for m in request.messages:
+        if m.role == "tool":
+            out.extend(
+                {"role": "tool", "tool_name": r.name, "content": r.content} for r in m.results
+            )
+        elif m.role == "assistant" and m.tool_calls:
+            calls = [
+                {"function": {"name": c.name, "arguments": _arguments(c)}} for c in m.tool_calls
+            ]
+            out.append({"role": "assistant", "content": m.text, "tool_calls": calls})
+        else:
+            out.append({"role": m.role, "content": m.text})
+    return out
+
+
+def to_ollama_tools(tools: list[ToolSpec] | None) -> list[dict[str, Any]] | None:
+    if not tools:
+        return None
+    return [
+        {
+            "type": "function",
+            "function": {"name": t.name, "description": t.description, "parameters": t.parameters},
+        }
+        for t in tools
+    ]
+
+
 class OllamaProvider:
     name = "ollama"
     supports_native_schema = True
@@ -53,9 +101,7 @@ class OllamaProvider:
         self._client = ollama.AsyncClient(host=host)
 
     async def stream(self, request: LLMRequest) -> AsyncGenerator[Event]:
-        messages = [{"role": m.role, "content": m.text} for m in request.messages]
-        if request.system:
-            messages.insert(0, {"role": "system", "content": request.system})
+        messages = to_ollama_messages(request)
         options: dict[str, float | int] = {}
         if request.temperature is not None:
             options["temperature"] = request.temperature
@@ -68,11 +114,23 @@ class OllamaProvider:
                 stream=True,
                 options=options or None,
                 format=request.response_schema,
+                tools=to_ollama_tools(request.tools),
             )
+            n_calls = 0
             async with aclosing(cast("AsyncGenerator[ollama.ChatResponse]", chunks)):
                 async for chunk in chunks:
                     if chunk.message.content:
                         yield TextDelta(text=chunk.message.content)
+                    # Ollama sends each tool call whole, with no id: number them per response.
+                    for call in chunk.message.tool_calls or []:
+                        yield ToolCallEvent(
+                            call=ToolCallPart(
+                                id=f"call_{n_calls}",
+                                name=call.function.name,
+                                arguments=dict(call.function.arguments),
+                            )
+                        )
+                        n_calls += 1
                     if chunk.done:
                         yield UsageEvent(
                             usage=Usage(

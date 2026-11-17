@@ -14,13 +14,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from llmcli.core.errors import (
+    InvalidRequestError,
     LLMError,
     LLMTimeoutError,
     ProviderUnavailableError,
     RateLimitError,
     SchemaValidationError,
 )
-from llmcli.core.events import Done, Event, TextDelta, fold
+from llmcli.core.events import Done, Event, TextDelta, ToolCallEvent, fold
 from llmcli.core.models import LLMRequest, LLMResponse, Message, Usage
 from llmcli.core.protocols import LLMProvider
 from llmcli.services import structured
@@ -83,6 +84,10 @@ class LLMService:
                 yield ev
 
     async def stream(self, request: LLMRequest) -> AsyncGenerator[Event]:
+        if request.tools and request.response_schema is not None:
+            raise InvalidRequestError(
+                "tools and a response schema cannot be combined in one request"
+            )
         start = time.perf_counter()
         attempt = 0
         while True:
@@ -91,8 +96,8 @@ class LLMService:
             try:
                 async with aclosing(self._attempt(request)) as events:
                     async for ev in events:
-                        if isinstance(ev, TextDelta):
-                            emitted = True
+                        if isinstance(ev, TextDelta | ToolCallEvent):
+                            emitted = True  # a tool call is output too: never replay it
                         elif isinstance(ev, Done) and ev.response is not None:
                             ev.response.usage.latency_ms = (time.perf_counter() - start) * 1000
                         yield ev

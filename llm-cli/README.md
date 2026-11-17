@@ -152,8 +152,51 @@ Design rules: the CLI and services never touch SDK types; streaming is a sequenc
 ### Adding a provider
 
 1. Create `providers/<name>.py` with a class that has `name`, `supports_native_schema`, and `stream(request) -> AsyncGenerator[Event]`. Map the SDK's stream to `TextDelta` / `UsageEvent` / `Done`, close the SDK stream (`aclosing`), and convert SDK exceptions to `llmcli.core.errors` types.
-2. Register it in `providers/registry.py`.
-3. Add price entries if it's paid, and a smoke test under `tests/integration/`.
+2. Map `request.tools` to the provider's format and emit a `ToolCallEvent` per tool call it makes (with an id: generate one if the provider sends none), and map tool-call and tool-result message parts back into the provider's conversation shape.
+3. Register it in `providers/registry.py`.
+4. Add price entries if it's paid, and a smoke test under `tests/integration/`.
+
+## Tool calling (library)
+
+The CLI does not use tools, but the library layer supports them so other programs can build agent loops on it. It is **additive**: text requests and the CLI behave exactly as before.
+
+```python
+from llmcli.core.models import LLMRequest, Message, ToolResultPart, ToolSpec
+from llmcli.providers.ollama import OllamaProvider
+from llmcli.services.llm import LLMService
+
+weather = ToolSpec(
+    name="get_weather",
+    description="Current weather for a city.",
+    parameters={"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+)
+service = LLMService(OllamaProvider())
+request = LLMRequest(
+    model="llama3.2",
+    tools=[weather],
+    messages=[Message.of("user", "What is the weather in Oslo?")],
+)
+
+asked = await service.generate(request)  # asked.tool_calls: list[ToolCallPart]
+call = asked.tool_calls[0]  # .id, .name, .arguments (raw, as the model sent it)
+result = ToolResultPart(call_id=call.id, name=call.name, content="4 degrees, light snow")
+request = request.model_copy(
+    update={
+        "messages": [
+            *request.messages,
+            Message.assistant(asked.text, asked.tool_calls),  # the model's turn, calls included
+            Message.tool_results([result]),  # your results, in the same order
+        ]
+    }
+)
+answer = await service.generate(request)  # now plain text
+```
+
+- New in the core types: `ToolSpec`, `ToolCallPart`, `ToolResultPart`, a `tool` message role, `LLMRequest.tools`, `LLMResponse.tool_calls`, and a `ToolCallEvent` in the stream. Messages enforce that calls appear only in assistant messages and results only in tool messages.
+- Arguments are **not validated here**: they are passed through raw (a dict, or JSON text for providers that send text). Validating and running tools is the caller's job (see the sibling `toolrouter` project).
+- **A tool call counts as output**: the service never retries a request after a tool call has been streamed, because the call may already have caused a side effect. Failures before any output are still retried.
+- Tools and a response schema (`--schema` / structured output) cannot be combined in one request.
+- Ollama assigns no call ids, so they are numbered per response (`call_0`, `call_1`, ...). Ollama matches results to calls by tool name and order, and has no error flag: make failures obvious in a result's `content`.
 
 ## Development
 

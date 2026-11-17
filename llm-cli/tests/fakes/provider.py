@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 
 from llmcli.core.errors import LLMError
-from llmcli.core.events import Done, Event, TextDelta, UsageEvent
-from llmcli.core.models import LLMRequest, Usage
+from llmcli.core.events import Done, Event, TextDelta, ToolCallEvent, UsageEvent
+from llmcli.core.models import LLMRequest, ToolCallPart, Usage
 
 
 class FakeProvider:
@@ -13,7 +13,8 @@ class FakeProvider:
     - `chunks`: output for every call (default "Hello, world").
     - `responses`: per-call outputs (each a list of chunks); the last repeats.
     - `error` / `error_calls`: raise on the first N calls (None = every call).
-    - `emit_before_error`: stream the chunks before raising (partial output).
+    - `emit_before_error`: stream the chunks (and tool calls) before raising (partial output).
+    - `tool_calls`: per-call tool calls (each a list; the last repeats); emitted after the text.
     """
 
     name = "fake"
@@ -28,6 +29,7 @@ class FakeProvider:
         error_calls: int | None = None,
         emit_before_error: bool = True,
         native_schema: bool = True,
+        tool_calls: list[list[ToolCallPart]] | None = None,
     ) -> None:
         self.chunks = chunks if chunks is not None else ["Hello", ", ", "world"]
         self.error = error
@@ -36,6 +38,7 @@ class FakeProvider:
         self.error_calls = error_calls
         self.emit_before_error = emit_before_error
         self.supports_native_schema = native_schema
+        self.tool_calls = tool_calls
         self.requests: list[LLMRequest] = []
 
     async def stream(self, request: LLMRequest) -> AsyncGenerator[Event]:
@@ -48,6 +51,9 @@ class FakeProvider:
         if not failing or self.emit_before_error:
             for c in chunks:
                 yield TextDelta(text=c)
+            if self.tool_calls:
+                for tool_call in self.tool_calls[min(call, len(self.tool_calls) - 1)]:
+                    yield ToolCallEvent(call=tool_call)
         if failing and self.error is not None:
             raise self.error
         yield UsageEvent(usage=self.usage)

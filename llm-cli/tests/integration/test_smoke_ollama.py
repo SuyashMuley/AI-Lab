@@ -28,7 +28,9 @@ def _skip_reason() -> str | None:
         names = {m.model for m in ollama.Client(timeout=2).list().models}
     except Exception as exc:
         return f"Ollama not reachable: {type(exc).__name__}"
-    return None if MODEL in names else f"model {MODEL!r} not pulled (ollama pull {MODEL})"
+    if MODEL in names or f"{MODEL}:latest" in names:  # `ollama list` shows untagged as :latest
+        return None
+    return f"model {MODEL!r} not pulled (ollama pull {MODEL})"
 
 
 _reason = _skip_reason()

@@ -9,12 +9,19 @@ from typing import Literal
 from pydantic import BaseModel
 
 from llmcli.core.errors import LLMError
-from llmcli.core.models import LLMResponse, Usage
+from llmcli.core.models import LLMResponse, ToolCallPart, Usage
 
 
 class TextDelta(BaseModel):
     type: Literal["text_delta"] = "text_delta"
     text: str
+
+
+class ToolCallEvent(BaseModel):
+    """The model asked to call a tool. Arrives whole (providers send complete calls)."""
+
+    type: Literal["tool_call"] = "tool_call"
+    call: ToolCallPart
 
 
 class UsageEvent(BaseModel):
@@ -34,7 +41,7 @@ class ErrorEvent(BaseModel):
     error: LLMError
 
 
-Event = TextDelta | UsageEvent | Done | ErrorEvent
+Event = TextDelta | ToolCallEvent | UsageEvent | Done | ErrorEvent
 
 
 async def fold(model: str, events: AsyncGenerator[Event]) -> AsyncGenerator[Event]:
@@ -44,18 +51,25 @@ async def fold(model: str, events: AsyncGenerator[Event]) -> AsyncGenerator[Even
     Done/ErrorEvent is a provider bug and raises LLMError.
     """
     parts: list[str] = []
+    calls: list[ToolCallPart] = []
     usage = Usage()
     async with aclosing(events):
         async for ev in events:
             if isinstance(ev, TextDelta):
                 parts.append(ev.text)
+            elif isinstance(ev, ToolCallEvent):
+                calls.append(ev.call)
             elif isinstance(ev, UsageEvent):
                 usage = ev.usage
             elif isinstance(ev, ErrorEvent):
                 raise ev.error
             elif isinstance(ev, Done):
                 resp = LLMResponse(
-                    text="".join(parts), model=model, finish_reason=ev.finish_reason, usage=usage
+                    text="".join(parts),
+                    model=model,
+                    finish_reason=ev.finish_reason,
+                    usage=usage,
+                    tool_calls=calls,
                 )
                 yield Done(finish_reason=ev.finish_reason, response=resp)
                 return

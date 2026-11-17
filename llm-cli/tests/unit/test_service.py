@@ -14,7 +14,7 @@ def req() -> LLMRequest:
 
 
 def test_message_str_shorthand() -> None:
-    assert Message(role="user", content="hi").content[0].text == "hi"  # type: ignore[arg-type]
+    assert Message(role="user", content="hi").text == "hi"  # type: ignore[arg-type]
 
 
 async def test_generate_folds_stream() -> None:

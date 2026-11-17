@@ -15,7 +15,7 @@ Twenty projects focused on building **AI agents, developer tools, and production
 |---|---|---|
 | LLM CLI | [`llm-cli/`](llm-cli/) | ✅ Done |
 | Strict Pydantic Tool Router | [`tool-router/`](tool-router/) | ✅ Done |
-| Local Agent Runtime + Self-Healing ReAct | `local-agent-runtime/` | ⬜ Not started |
+| Local Agent Runtime + Self-Healing ReAct | [`local-agent-runtime/`](local-agent-runtime/) | 🚧 In progress (R0–R2 done) |
 | Dynamic Context Budget Assembler | `context-budget-assembler/` | ⬜ Not started |
 | Memory & Context Engine | `memory-context-engine/` | ⬜ Not started |
 

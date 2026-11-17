@@ -73,6 +73,7 @@ LLM CLI/
 | M8 | Structured output | `--schema file.json` uses native provider support where available, validates, and retries with the error on failure |
 | M9 (optional) | Conversation sessions | SQLite persistence; `--continue` |
 | M10 | Polish | README, smoke tests per real provider, installable via `uv tool install` |
+| M11 | Tool calling (added for the Local Agent Runtime) | Additive: tool-call/tool-result message parts and a `tool` role, `tools` on requests, `ToolCallEvent`, Ollama mapping both ways; a tool call counts as output so it is never retried; existing behaviour and tests unchanged; real-model round-trip test |
 
 **Usable version: M4. Solid foundation: M8.**
 
@@ -99,3 +100,5 @@ LLM CLI/
 **Done.** M1, M2 and M4-M10 are implemented. M3 (second provider) was dropped by decision, so Ollama is the only provider. The provider interface is in place, so adding one later is a small change (see the README), but the abstraction has not been exercised against a differently shaped API, and the prompt-only structured-output path is covered by tests with a fake provider only.
 
 Decisions made along the way: first provider Ollama, type checker mypy (strict), M9 included. History is saved by default (`--no-save` or `save_history=false` to opt out).
+
+**M11 (tool calling)** was added for Project 3 (Local Agent Runtime). It is additive and backwards compatible: the 67 original offline tests pass unchanged, and the new tests cover message/part rules, stream folding, the no-replay rule for tool calls, the Ollama mapping, and a real-model round trip.
