@@ -89,7 +89,8 @@ local-agent-runtime/
 │   ├── state.py        # RunState, Budgets, reduce()
 │   ├── decide.py       # decide(state) -> Action; escalation ladder
 │   ├── recovery.py     # fault taxonomy, detectors (empty/repeat/no-progress), circuit breaker
-│   ├── models.py       # ModelClient protocol, ModelTurn, llmcli adapter, FallbackModel wrapper
+│   ├── models.py       # ModelClient protocol, ModelTurn, FallbackModel wrapper (R4)
+│   ├── clients.py      # LlmcliModel (llmcli-backed ModelClient), ollama_client()
 │   ├── context.py      # ContextStrategy protocol + WindowStrategy (default)
 │   ├── output.py       # final-answer validation, wrap-up turn
 │   ├── store.py        # SQLite event store: append, load, list, resume
@@ -151,6 +152,7 @@ Every recovery is **bounded** (its own counter plus the global `max_recoveries`)
 |---|---|---|
 | Model unreachable / 5xx / timeout | normalized `llmcli` error class | retry with backoff (3 tries), then `failed` (resumable) |
 | Empty turn (no text, no tool calls) | turn inspection | nudge ("continue, or give your final answer"), max 2 |
+| **Tool call written as text** (measured: 5 of 12 strict runs) | the reply parses as a JSON object (bare or fenced) whose `name` is an available tool | nudge: "that looks like a tool call written as text; make the call through the tool-calling interface"; the text is never executed as a call (it could be injected) |
 | Malformed / unknown / invalid tool call | `toolrouter` error codes | the router's repair message goes back to the model; consecutive-repair budget (as in the T9 demo loop) |
 | Tool keeps failing | per-tool consecutive failures | circuit breaker: after 3, **withdraw the tool** from the offered set and tell the model |
 | Repeating itself | same `(tool, args)` and same result seen again | warn at the 2nd repeat, withdraw the tool at the 3rd |
@@ -183,7 +185,7 @@ Every recovery is **bounded** (its own counter plus the global `max_recoveries`)
 | R0 | **Prerequisite, in `llm-cli`:** tool calling | **Done.** (llm-cli 0.2.0, plan row M11; the 67 original offline tests pass unchanged, plus 44 new offline tests and 3 real-model tests.)  Additive and backwards compatible: tool-call/tool-result message parts and a `tool` role; `tools` on `LLMRequest`; a `ToolCallEvent` in the stream and `tool_calls` on `LLMResponse`; Ollama maps tools both ways; `FakeProvider` supports it; no retry once any output (including a tool call) has been streamed; every existing llm-cli test still passes; one real-model smoke test |
 | R1 | Scaffold + model seam + minimal loop | **Done.**  `ModelClient`, `ModelTurn`, `ScriptedModel`; a no-tools run returns a `RunResult`; `uv sync` works |
 | R2 | The ReAct loop on `toolrouter` | **Done.**  Think, act, observe over scripted models; budgets (steps, tool calls); pure `reduce`/`decide`; in-memory event log; `RunResult`; replaying the log reproduces the state |
-| R3 | Ollama client | Via `llmcli`: native tool calling, usage, `num_ctx` set explicitly, per-reply timeout, transient-error retry with backoff; streaming deltas; smoke test against a real model |
+| R3 | Ollama client | **Done** (retry moved to R4, see R3 notes).  Via `llmcli`: native tool calling, usage, `num_ctx` set explicitly, per-reply timeout, transient-error retry with backoff; streaming deltas; smoke test against a real model |
 | R4 | Self-healing I (model-side faults) | Empty-turn nudges, bounded model retries, malformed-call repair budget; `FallbackModel(primary, secondary)` wrapper switches to the pluggable secondary when the primary keeps failing, and records it; each recovery is an event; none can loop forever |
 | R5 | Self-healing II (behavioural faults) | Repetition and no-progress detection, per-tool circuit breaker, the escalation ladder; chaos tests show no run exceeds its budgets |
 | R6 | Output validation + wrap-up | Optional structured final output with bounded repair; wrap-up turn on budget exhaustion yields `partial` with an honest status |
@@ -259,3 +261,18 @@ Design points worth knowing:
 - `localagent.testing.call` takes `name` and `call_id` positionally-only, so tools may have arguments with those names (found by a test).
 
 Still temporary in `decide`: an empty reply fails the run (R4), a model error ends it (R4), budget exhaustion fails instead of wrapping up (R6), and an unresolved tool batch fails (R8 resumes it). Persisted logs will redact secret tool arguments (R8); the in-memory log returned today holds the raw arguments the model sent.
+
+## R3 notes (the Ollama client)
+`ollama_client(...)` returns an `LlmcliModel`: a `ModelClient` over `llmcli`'s Ollama provider, which maps tools and tool calls both ways (R0). Added around it: `Agent.coerce` (lenient validation, wired to the router), a provider-level `options` dict in `llm-cli` (additive; for `num_ctx`), optional `on_text` streaming deltas, and an optional `idle_timeout_s`.
+
+Deviations from the original R3 row, on purpose:
+- **No hidden retries.** The adapter makes exactly one attempt. "Retry on transient errors" moved to R4, where each retry is a visible, bounded event in the log. A retry inside the adapter would multiply with R4's (3x3 attempts) and leave no trace, against the plan's own "no silent retries" rule.
+- **Streaming is adapter-level for now.** `respond(request, on_text=...)` delivers text deltas as they arrive (a crashing observer never fails the call; deltas are not logged: one event per token would bloat the log). R9 wires it into the runtime's live stream.
+
+What the real model showed (all `llama3.2` 3B, temperature 0, fixed seed; small samples):
+- **The context window setting really reaches Ollama.** The same ~6,000-token prompt read as >4,500 tokens with `num_ctx=8192` but at most 2,048 with `num_ctx=2048`: Ollama silently drops what does not fit, with no error. `ollama_client` therefore defaults `num_ctx` to 8192 (`None` opts back into Ollama's small default).
+- **Integer arguments are the weak spot.** 12 runs of `add(a: int, b: int)` ("What is 17 + 25? Use the add tool."): strict validation saw only **7 of 12** first calls valid (the model sent `"17"`, `"25"`); lenient (`coerce`) saw **12 of 12**, all answers correct.
+- **A rejected call is not reliably repaired with a real tool call.** In all 5 strict failures the model did not retry the call natively; it wrote the corrected call as text (`{"name": "add", "parameters": {...}}`) and the loop accepted that as a `completed` run with a junk answer. This is the new "tool call written as text" fault in the taxonomy (R4 detector). It also qualifies the earlier claim that strict-by-default is cheap: that measurement used mostly string arguments (corrected in `tool-router`'s docs).
+- Failures are contained: an unknown model, an unreachable server (fails in under 10s) and a tiny reply timeout each end as a `failed` run with a clear error, never an exception; a read-only agent never ran a WRITE tool.
+
+Decision pending: whether the runtime should default `Agent.coerce` to **True** for READ/NONE tools, since it targets small local models (WRITE tools stay strict regardless). The evidence above favours it; it is currently `False` (the library default).

@@ -196,6 +196,7 @@ answer = await service.generate(request)  # now plain text
 - Arguments are **not validated here**: they are passed through raw (a dict, or JSON text for providers that send text). Validating and running tools is the caller's job (see the sibling `toolrouter` project).
 - **A tool call counts as output**: the service never retries a request after a tool call has been streamed, because the call may already have caused a side effect. Failures before any output are still retried.
 - Tools and a response schema (`--schema` / structured output) cannot be combined in one request.
+- `OllamaProvider(options={"num_ctx": 8192})` applies Ollama model options to every request. Set `num_ctx` for long conversations: Ollama's default context is small and it **silently drops what does not fit** rather than raising an error. `temperature` and `max_tokens` on a request override the provider's options.
 - Ollama assigns no call ids, so they are numbered per response (`call_0`, `call_1`, ...). Ollama matches results to calls by tool name and order, and has no error flag: make failures obvious in a result's `content`.
 
 ## Development

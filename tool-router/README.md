@@ -307,7 +307,7 @@ What it does **not** do:
 - **Policies run after validation**, so a denied tool's signature can still appear in validation errors, and unknown-tool messages list every registered tool. Register only what a model may use.
 - **Hooks that block the event loop with sync code can't be timed out.**
 - **Not an agent framework.** The loop in `toolrouter.demo.chat` is a deliberately tiny demonstration of a bounded repair budget.
-- Verified live only against Ollama + `llama3.2` (see above). On that model, 36 tool calls per mode across 10 tasks needed 1 repair in strict mode and none with `coerce`: a small sample, but it suggests strict-by-default is cheap.
+- Verified live only against Ollama + `llama3.2`. **Strict-by-default is cheap only for string arguments.** In the demo tasks (mostly string arguments) 36 tool calls per mode needed 1 repair in strict mode and none with `coerce`. But a follow-up with *integer* arguments (12 runs, `add(a: int, b: int)`) found this model sent numbers as strings in 5 of 12 runs under strict validation and never repaired them with a real tool call, while `coerce=True` made all 12 succeed. For small local models, enable `coerce` (`WRITE` tools stay strict regardless); keep strict for models that follow schemas.
 
 ## Development
 

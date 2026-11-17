@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import aclosing
 from typing import Any, cast
 
@@ -97,12 +97,21 @@ class OllamaProvider:
     name = "ollama"
     supports_native_schema = True
 
-    def __init__(self, host: str | None = None) -> None:
+    def __init__(
+        self, host: str | None = None, *, options: Mapping[str, Any] | None = None
+    ) -> None:
+        """`options` are Ollama model options applied to every request (e.g. `{"num_ctx": 8192}`).
+
+        Set `num_ctx` for anything with long conversations: Ollama's default context is small
+        (4096 tokens) and it silently drops what does not fit instead of raising an error.
+        Per-request settings (`temperature`, `max_tokens`) override these.
+        """
         self._client = ollama.AsyncClient(host=host)
+        self.options: dict[str, Any] = dict(options or {})
 
     async def stream(self, request: LLMRequest) -> AsyncGenerator[Event]:
         messages = to_ollama_messages(request)
-        options: dict[str, float | int] = {}
+        options: dict[str, Any] = dict(self.options)
         if request.temperature is not None:
             options["temperature"] = request.temperature
         if request.max_tokens is not None:

@@ -2,6 +2,7 @@
 
 from localagent.agent import DEFAULT_SYSTEM, Agent, AgentRuntime
 from localagent.budgets import Budgets
+from localagent.clients import DEFAULT_NUM_CTX, LlmcliModel, ollama_client
 from localagent.decide import Action, CallModel, DispatchTools, Finish, Stop, decide
 from localagent.events import (
     EventLog,
@@ -22,6 +23,7 @@ from localagent.state import InvalidEventError, LastTurn, PendingBatch, RunState
 from localagent.tooling import TOOL_GUIDANCE, effective_system, tool_specs
 
 __all__ = [
+    "DEFAULT_NUM_CTX",
     "DEFAULT_SYSTEM",
     "Action",
     "Agent",
@@ -33,6 +35,7 @@ __all__ = [
     "Finish",
     "InvalidEventError",
     "LastTurn",
+    "LlmcliModel",
     "ModelClient",
     "ModelFailed",
     "ModelRequested",
@@ -54,6 +57,7 @@ __all__ = [
     "TurnRequest",
     "decide",
     "effective_system",
+    "ollama_client",
     "reduce",
     "replay",
     "tool_specs",

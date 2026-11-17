@@ -239,6 +239,43 @@ async def test_writes_run_only_when_the_agent_is_given_a_permissive_policy() -> 
     assert tool_message_contents(model.requests[1]) == ["saved x"]
 
 
+# ---- lenient validation ----
+
+
+async def test_numbers_sent_as_strings_are_rejected_by_default_and_accepted_with_coerce() -> None:
+    def script() -> ScriptedModel:
+        return ScriptedModel(turn("", call("add", a="17", b="25")), "done")
+
+    strict = script()
+    await run(strict)
+    feedback = tool_message_contents(strict.requests[1])[0]
+    assert feedback.startswith("Error (arguments_invalid):")
+    assert fake_tools.CALLS == []
+
+    lenient = script()
+    await run(lenient, agent(coerce=True))
+    assert tool_message_contents(lenient.requests[1]) == ["42"]
+    assert fake_tools.CALLS == ["add"]
+
+
+async def test_coerce_never_loosens_a_write_tool() -> None:
+    from toolrouter import SideEffect, tool
+
+    ran: list[int] = []
+
+    @tool(side_effect=SideEffect.WRITE)
+    def write_number(n: int) -> str:
+        """A WRITE tool with an integer argument."""
+        ran.append(n)
+        return "written"
+
+    model = ScriptedModel(turn("", call("write_number", n="5")), "done")
+    a = Agent(model="m", tools=ToolRegistry([write_number]), policy=AllowAll(), coerce=True)
+    await run(model, a)
+    assert ran == []  # "5" was not coerced: WRITE tools must opt in themselves
+    assert tool_message_contents(model.requests[1])[0].startswith("Error (arguments_invalid):")
+
+
 # ---- budgets ----
 
 

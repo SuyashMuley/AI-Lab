@@ -51,6 +51,9 @@ class Agent:
     tools: ToolRegistry = field(default_factory=ToolRegistry)
     policy: Policy = field(default_factory=ReadOnlyPolicy)
     budgets: Budgets = field(default_factory=Budgets)
+    # Lenient argument validation for READ/NONE tools ("17" accepted for an int). Small models
+    # often send numbers as strings; WRITE tools never inherit this (toolrouter's rule).
+    coerce: bool = False
 
 
 def _new_run_id() -> str:
@@ -79,7 +82,7 @@ class AgentRuntime:
         """
         log = EventLog(self._clock)
         state: RunState | None = None
-        router = ToolRouter(agent.tools, policy=agent.policy)
+        router = ToolRouter(agent.tools, policy=agent.policy, coerce=agent.coerce)
         specs = tool_specs(agent.tools)
 
         def apply(event: RunEvent) -> RunState:
